@@ -15,6 +15,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	gopath "path"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -99,6 +100,22 @@ func (e *RedirectError) Error() string {
 //
 // See Connect for details of the connection mechanics.
 func Open(info *Info, opts DialOpts) (Connection, error) {
+	// If the user requires an additional path i.e., /my-own/segment
+	// we need to append it to the modelRoot. This could have come from an LB,
+	// proxy, or other network configuration.
+	var userPath string
+	for i, addr := range info.Addrs {
+		cutAddr, path, ok := strings.Cut(addr, "/")
+		if !ok {
+			break
+		}
+		// Just use the first path we find, we don't support multiple paths.
+		if i == 0 {
+			userPath = path
+		}
+		info.Addrs[i] = cutAddr
+	}
+
 	if err := info.Validate(); err != nil {
 		return nil, errors.Annotate(err, "validating info for opening an API connection")
 	}
@@ -113,7 +130,7 @@ func Open(info *Info, opts DialOpts) (Connection, error) {
 		dialCtx = ctx1
 	}
 
-	dialResult, err := dialAPI(dialCtx, info, opts)
+	dialResult, err := dialAPI(dialCtx, info, opts, userPath)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
@@ -495,7 +512,7 @@ type dialOpts struct {
 // connection wins.
 //
 // It also returns the TLS configuration that it has derived from the Info.
-func dialAPI(ctx context.Context, info *Info, opts0 DialOpts) (*dialResult, error) {
+func dialAPI(ctx context.Context, info *Info, opts0 DialOpts, userPath string) (*dialResult, error) {
 	if len(info.Addrs) == 0 {
 		return nil, errors.New("no API addresses to connect to")
 	}
@@ -545,10 +562,13 @@ func dialAPI(ctx context.Context, info *Info, opts0 DialOpts) (*dialResult, erro
 	if opts.DNSCache == nil {
 		opts.DNSCache = nopDNSCache{}
 	}
+
 	path, err := apiPath(info.ModelTag.Id(), "/api")
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
+
+	path = gopath.Join("/", userPath, path)
 
 	// Encourage load balancing by shuffling controller addresses.
 	rand.Shuffle(len(addrs), func(i, j int) { addrs[i], addrs[j] = addrs[j], addrs[i] })
