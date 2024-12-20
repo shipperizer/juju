@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 
 	"github.com/go-macaroon-bakery/macaroon-bakery/v3/httpbakery"
@@ -113,6 +114,10 @@ func (info *Info) Validate() error {
 	}
 
 	for _, addr := range info.Addrs {
+		if cutAddr, _, ok := strings.Cut(addr, "/"); ok {
+			addr = cutAddr
+		}
+
 		_, err := network.ParseMachineHostPort(addr)
 		if err != nil {
 			return errors.NotValidf("host addresses: %v", err)
